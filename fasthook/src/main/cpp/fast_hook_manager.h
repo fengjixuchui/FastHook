@@ -13,6 +13,8 @@ uint32_t kPointerSize32 = 4;
 uint32_t kPointerSize64 = 8;
 
 uint32_t kHiddenApiPolicyOffset = 0;
+uint32_t kDarkGreyAndBlackList = 2;
+uint32_t kHiddenApiPolicyScope = 100;
 
 uint32_t kAccNative = 0x0100;
 uint32_t kAccCompileDontBother = 0;
@@ -69,9 +71,9 @@ static struct {
 	jfieldID target_trampoline_;
 } kHookRecordClassInfo;
 
-struct CompileParam {
-	void *art_method;
-	int success;
+struct SigactionInfo {
+    void *addr;
+    int len;
 };
 
 #if defined(__aarch64__)
@@ -80,13 +82,11 @@ struct CompileParam {
 # define __get_tls() ({ void** __val; __asm__("mrc p15, 0, %0, c13, c0, 3" : "=r"(__val)); __val; })
 #endif
 
-pthread_t compile_thread_;
-pthread_cond_t compile_cond_;
-pthread_mutex_t compile_mutex_;
-
-struct CompileParam *compile_param_;
-uint32_t kCompileWaitTime = 5000;
 uint32_t kTLSSlotArtThreadSelf = 0;
+
+struct SigactionInfo *sigaction_info_ = NULL;
+struct sigaction *default_handler_ = NULL;
+struct sigaction *current_handler_ = NULL;
 
 JavaVM *jvm_ = NULL;
 void *runtime_ = NULL;
@@ -95,8 +95,7 @@ void* (*jit_load_)(bool*) = NULL;
 void* jit_compiler_handle_ = NULL;
 bool (*jit_compile_method_)(void*, void*, void*, bool) = NULL;
 void** art_jit_compiler_handle_ = NULL;
-void (*suspend_all_)() = NULL;
-void (*resume_all_)() = NULL;
+void *art_quick_to_interpreter_bridge_ = NULL;
 
 uint32_t pointer_size_ = 0;
 
@@ -282,6 +281,10 @@ static inline uint32_t ReadInt32(void *pointer) {
 
 static inline uint16_t ReadInt16(void *pointer) {
 	return *((uint16_t *)pointer);
+}
+
+static inline uint8_t ReadInt8(void *pointer) {
+    return *((uint8_t *)pointer);
 }
 
 static inline uint32_t RoundUp(uint32_t size, uint32_t ptr_size) {
